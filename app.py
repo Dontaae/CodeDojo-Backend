@@ -6,7 +6,7 @@ from flask_cors import CORS
 
 app = Flask(__name__)
 
-# Allow specific origins to avoid CORS errors
+# Explicitly allow your frontend URL and backend URL
 CORS(app, resources={r"/*": {"origins": ["http://localhost:3000", "https://cododojo-backend.onrender.com"]}}, supports_credentials=True)
 
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
@@ -17,17 +17,19 @@ db = SQLAlchemy(app)
 bcrypt = Bcrypt(app)
 jwt = JWTManager(app)
 
-# User model
-class User(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(80), unique=True, nullable=False)
-    email = db.Column(db.String(120), unique=True, nullable=False)
-    password = db.Column(db.String(120), nullable=False)
+@app.after_request
+def add_cors_headers(response):
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+    return response
 
-# Create database tables if they don't exist
-with app.app_context():
-    db.create_all()
+# Test route to confirm backend is working
+@app.route('/')
+def home():
+    return "Backend is running!"
 
+# Register endpoint
 @app.route('/register', methods=['POST'])
 def register():
     data = request.get_json()
@@ -44,15 +46,6 @@ def register():
     db.session.commit()
     
     return jsonify(message='User registered successfully!'), 201
-
-@app.route('/login', methods=['POST'])
-def login():
-    data = request.get_json()
-    user = User.query.filter_by(username=data['username']).first()
-    if user and bcrypt.check_password_hash(user.password, data['password']):
-        access_token = create_access_token(identity=user.username)
-        return jsonify(access_token=access_token), 200
-    return jsonify(message='Invalid credentials!'), 401
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
