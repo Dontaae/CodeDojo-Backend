@@ -71,7 +71,11 @@ def register():
 @app.route('/login', methods=['POST', 'OPTIONS'])
 def login():
     if request.method == 'OPTIONS':
-        return jsonify({"message": "CORS preflight passed"}), 200
+        response = jsonify({"message": "CORS preflight passed"})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        return response, 200
 
     data = request.get_json()
     if not data:
