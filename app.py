@@ -16,7 +16,8 @@ app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'supersecretkey')
 db = SQLAlchemy(app)
 bcrypt = Bcrypt(app)
 jwt = JWTManager(app)
-CORS(app)  
+CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True) 
+ 
 
 
 class User(db.Model):
