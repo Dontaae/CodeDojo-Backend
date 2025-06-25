@@ -9,6 +9,8 @@ from flask_jwt_extended import (
 )
 from flask_cors import CORS
 from sqlalchemy import PickleType
+import subprocess
+import tempfile
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
@@ -78,12 +80,11 @@ def login():
     data = request.get_json()
     user = User.query.filter_by(username=data['username']).first()
     if user and bcrypt.check_password_hash(user.password, data['password']):
-        # identity must be a string
         access_token = create_access_token(identity=str(user.id))
         return jsonify(access_token=access_token), 200
     return jsonify(message='Invalid credentials!'), 401
 
-# Challenge routes
+# Challenge list & detail
 @app.route('/api/challenges', methods=['GET'])
 @jwt_required()
 def list_challenges():
@@ -112,6 +113,7 @@ def get_challenge(challenge_id):
         "xp_reward": c.xp_reward
     }), 200
 
+# Submit solution & award XP
 @app.route('/api/submit-challenge', methods=['POST'])
 @jwt_required()
 def submit_challenge():
@@ -123,7 +125,6 @@ def submit_challenge():
     if user_output != challenge.expected_output.strip():
         return jsonify({"message": "Incorrect solution."}), 400
 
-    # get_jwt_identity() returns the string we set; cast to int
     user_id = int(get_jwt_identity())
     user = User.query.get_or_404(user_id)
 
@@ -143,6 +144,35 @@ def submit_challenge():
         "xp": user.xp,
         "rank": get_rank_from_xp(user.xp)
     }), 200
+
+# Run user code against sample input
+@app.route('/api/run-challenge', methods=['POST'])
+@jwt_required()
+def run_challenge():
+    data = request.get_json()
+    cid = data.get('challenge_id')
+    code = data.get('code', '')
+    challenge = Challenge.query.get_or_404(cid)
+    sample_input = challenge.sample_input or ''
+
+    # Write code to a temp file
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+        f.write(code)
+        fname = f.name
+
+    try:
+        proc = subprocess.run(
+            ['python', fname],
+            input=sample_input.encode(),
+            capture_output=True,
+            timeout=5
+        )
+        return jsonify({
+            'stdout': proc.stdout.decode(),
+            'stderr': proc.stderr.decode()
+        }), 200
+    except subprocess.TimeoutExpired:
+        return jsonify({'stderr': 'Error: execution timed out'}), 400
 
 if __name__ == '__main__':
     app.run(debug=True)
