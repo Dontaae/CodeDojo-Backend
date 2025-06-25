@@ -88,12 +88,14 @@ def login():
 @app.route('/api/challenges', methods=['GET'])
 @jwt_required()
 def list_challenges():
+    user = User.query.get_or_404(int(get_jwt_identity()))
     data = [
         {
             "id": c.id,
             "title": c.title,
             "difficulty": c.difficulty,
-            "xp_reward": c.xp_reward
+            "xp_reward": c.xp_reward,
+            "completed": c.id in user.completed_challenges
         }
         for c in Challenge.query.all()
     ]
@@ -102,6 +104,7 @@ def list_challenges():
 @app.route('/api/challenges/<int:challenge_id>', methods=['GET'])
 @jwt_required()
 def get_challenge(challenge_id):
+    user = User.query.get_or_404(int(get_jwt_identity()))
     c = Challenge.query.get_or_404(challenge_id)
     return jsonify({
         "id": c.id,
@@ -110,7 +113,8 @@ def get_challenge(challenge_id):
         "sample_input": c.sample_input,
         "expected_output": c.expected_output,
         "difficulty": c.difficulty,
-        "xp_reward": c.xp_reward
+        "xp_reward": c.xp_reward,
+        "completed": c.id in user.completed_challenges
     }), 200
 
 # Submit solution & award XP (with normalization)
