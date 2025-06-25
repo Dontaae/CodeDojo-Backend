@@ -116,14 +116,22 @@ def get_challenge(challenge_id):
 def submit_challenge():
     data = request.get_json()
     cid = data.get('challenge_id')
-    raw_output = data.get('user_output', '')
+    user_output = data.get('user_output', '')
+    code = data.get('code', '')
 
     challenge = Challenge.query.get_or_404(cid)
     expected = challenge.expected_output or ''
-    def normalize(s: str) -> str:
-        return ''.join(s.lower().split())
 
-    if normalize(raw_output) != normalize(expected):
+    # normalize helper
+    def normalize(text: str) -> str:
+        return ''.join(text.lower().split())
+
+    # reject hardcoded output
+    if normalize(expected) in normalize(code):
+        return jsonify(message='Hardcoded output detected. Please compute using input.'), 400
+
+    # compare output
+    if normalize(user_output) != normalize(expected):
         return jsonify(message='Incorrect solution.'), 400
 
     user = User.query.get_or_404(int(get_jwt_identity()))
