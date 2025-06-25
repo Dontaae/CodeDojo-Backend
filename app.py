@@ -113,16 +113,22 @@ def get_challenge(challenge_id):
         "xp_reward": c.xp_reward
     }), 200
 
-# Submit solution & award XP
+# Submit solution & award XP (with normalization)
 @app.route('/api/submit-challenge', methods=['POST'])
 @jwt_required()
 def submit_challenge():
     data = request.get_json()
     cid = data.get("challenge_id")
-    user_output = data.get("user_output", "").strip()
+    user_output = data.get("user_output", "")
 
     challenge = Challenge.query.get_or_404(cid)
-    if user_output != challenge.expected_output.strip():
+    expected = challenge.expected_output or ""
+
+    # normalize: lowercase + remove all whitespace
+    def normalize(text: str) -> str:
+        return "".join(text.lower().split())
+
+    if normalize(user_output) != normalize(expected):
         return jsonify({"message": "Incorrect solution."}), 400
 
     user_id = int(get_jwt_identity())
