@@ -14,23 +14,46 @@ import tempfile
 import re
 
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI']   = 'sqlite:///users.db'
+app.config['SQLALCHEMY_DATABASE_URI']        = 'sqlite:///users.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['JWT_SECRET_KEY']            = 'supersecretkey'  # Change in prod
+app.config['JWT_SECRET_KEY']                 = 'supersecretkey'  # Change in prod
 
 db     = SQLAlchemy(app)
 bcrypt = Bcrypt(app)
 jwt    = JWTManager(app)
 CORS(app)
 
-# ────────────────────────────────────────────────────
-# TEMP DEV RESET + SEED: drop, recreate, then seed challenges
-# Remove this block once your schema & data are stable!
+def get_rank_from_xp(xp: int) -> str:
+    if xp >= 200: return "Black Belt"
+    if xp >= 130: return "Brown Belt"
+    if xp >= 70:  return "Purple Belt"
+    if xp >= 30:  return "Blue Belt"
+    return "White Belt"
+
+class User(db.Model):
+    id                   = db.Column(db.Integer, primary_key=True)
+    username             = db.Column(db.String(80), unique=True, nullable=False)
+    email                = db.Column(db.String(120), unique=True, nullable=False)
+    password             = db.Column(db.String(120), nullable=False)
+    xp                   = db.Column(db.Integer, default=0, nullable=False)
+    completed_challenges = db.Column(PickleType, default=list, nullable=False)
+
+class Challenge(db.Model):
+    id              = db.Column(db.Integer, primary_key=True)
+    title           = db.Column(db.String(150), nullable=False)
+    description     = db.Column(db.Text, nullable=False)
+    sample_input    = db.Column(db.Text, nullable=False)
+    expected_output = db.Column(db.Text, nullable=False)
+    difficulty      = db.Column(db.String(50), nullable=False)  # easy/medium/hard
+    xp_reward       = db.Column(db.Integer, nullable=False)
+
+# ────────────────────────────────────────────────────────────────────
+# TEMP DEV RESET + SEED:
+# on each startup drop & recreate tables, then seed if empty.
 with app.app_context():
     db.drop_all()
     db.create_all()
 
-    # only seed if there are no challenges
     if Challenge.query.count() == 0:
         seeds = [
             {
@@ -49,7 +72,7 @@ with app.app_context():
                 "difficulty": "easy",
                 "xp_reward": 15
             },
-            # add more seeds here...
+            # ... add more here as needed ...
         ]
         for s in seeds:
             db.session.add(Challenge(
@@ -61,31 +84,7 @@ with app.app_context():
                 xp_reward       = s["xp_reward"]
             ))
         db.session.commit()
-# ────────────────────────────────────────────────────
-
-def get_rank_from_xp(xp: int) -> str:
-    if xp >= 200: return "Black Belt"
-    if xp >= 130: return "Brown Belt"
-    if xp >= 70:  return "Purple Belt"
-    if xp >= 30:  return "Blue Belt"
-    return "White Belt"
-
-class User(db.Model):
-    id                    = db.Column(db.Integer, primary_key=True)
-    username              = db.Column(db.String(80), unique=True, nullable=False)
-    email                 = db.Column(db.String(120), unique=True, nullable=False)
-    password              = db.Column(db.String(120), nullable=False)
-    xp                    = db.Column(db.Integer, default=0, nullable=False)
-    completed_challenges  = db.Column(PickleType, default=list, nullable=False)
-
-class Challenge(db.Model):
-    id              = db.Column(db.Integer, primary_key=True)
-    title           = db.Column(db.String(150), nullable=False)
-    description     = db.Column(db.Text, nullable=False)
-    sample_input    = db.Column(db.Text, nullable=False)
-    expected_output = db.Column(db.Text, nullable=False)
-    difficulty      = db.Column(db.String(50), nullable=False)  # easy/medium/hard
-    xp_reward       = db.Column(db.Integer, nullable=False)
+# ────────────────────────────────────────────────────────────────────
 
 @app.route('/register', methods=['POST'])
 def register():
@@ -94,6 +93,7 @@ def register():
         return jsonify(message='Username already exists!'), 400
     if User.query.filter_by(email=data['email']).first():
         return jsonify(message='Email already exists!'), 400
+
     pwd = bcrypt.generate_password_hash(data['password']).decode('utf-8')
     u   = User(username=data['username'], email=data['email'], password=pwd)
     db.session.add(u)
@@ -183,7 +183,7 @@ def submit_challenge():
     if re.search(rf'print\(\s*{lit}\s*\)', code):
         return jsonify({"message": "Incorrect solution."}), 400
 
-    # normalize
+    # normalize for comparison
     def normalize(txt: str) -> str:
         return "".join(txt.lower().split())
 
