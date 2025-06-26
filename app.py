@@ -16,7 +16,7 @@ import re
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI']   = 'sqlite:///users.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['JWT_SECRET_KEY']            = 'supersecretkey'  # Change in production
+app.config['JWT_SECRET_KEY']            = 'supersecretkey'  # Change in prod
 
 db     = SQLAlchemy(app)
 bcrypt = Bcrypt(app)
@@ -24,11 +24,43 @@ jwt    = JWTManager(app)
 CORS(app)
 
 # ────────────────────────────────────────────────────
-# TEMPORARY DEV RESET: drop & recreate all tables on startup
-# Remove this block once your DB schema is correct and seeded!
+# TEMP DEV RESET + SEED: drop, recreate, then seed challenges
+# Remove this block once your schema & data are stable!
 with app.app_context():
     db.drop_all()
     db.create_all()
+
+    # only seed if there are no challenges
+    if Challenge.query.count() == 0:
+        seeds = [
+            {
+                "title": "Hello World",
+                "description": "Print \"Hello World\"",
+                "sample_input": "",
+                "expected_output": "Hello World",
+                "difficulty": "easy",
+                "xp_reward": 10
+            },
+            {
+                "title": "Two Sum",
+                "description": "Read two ints from input, output their sum",
+                "sample_input": "3 5",
+                "expected_output": "8",
+                "difficulty": "easy",
+                "xp_reward": 15
+            },
+            # add more seeds here...
+        ]
+        for s in seeds:
+            db.session.add(Challenge(
+                title           = s["title"],
+                description     = s["description"],
+                sample_input    = s["sample_input"],
+                expected_output = s["expected_output"],
+                difficulty      = s["difficulty"],
+                xp_reward       = s["xp_reward"]
+            ))
+        db.session.commit()
 # ────────────────────────────────────────────────────
 
 def get_rank_from_xp(xp: int) -> str:
@@ -117,7 +149,6 @@ def run_challenge():
     c    = Challenge.query.get_or_404(cid)
     inp  = c.sample_input or ''
 
-    # Write code to a temp file
     with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
         f.write(code)
         fname = f.name
@@ -147,12 +178,12 @@ def submit_challenge():
     c   = Challenge.query.get_or_404(cid)
     exp = c.expected_output or ""
 
-    # Cheat-detect literal print
+    # cheat-detect literal prints
     lit = re.escape(exp.strip())
     if re.search(rf'print\(\s*{lit}\s*\)', code):
         return jsonify({"message": "Incorrect solution."}), 400
 
-    # Normalize for comparison
+    # normalize
     def normalize(txt: str) -> str:
         return "".join(txt.lower().split())
 
