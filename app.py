@@ -14,14 +14,22 @@ import tempfile
 import re
 
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
+app.config['SQLALCHEMY_DATABASE_URI']   = 'sqlite:///users.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['JWT_SECRET_KEY'] = 'supersecretkey'  # Change in production
+app.config['JWT_SECRET_KEY']            = 'supersecretkey'  # Change in production
 
-db = SQLAlchemy(app)
+db     = SQLAlchemy(app)
 bcrypt = Bcrypt(app)
-jwt = JWTManager(app)
+jwt    = JWTManager(app)
 CORS(app)
+
+# ────────────────────────────────────────────────────
+# TEMPORARY DEV RESET: drop & recreate all tables on startup
+# Remove this block once your DB schema is correct and seeded!
+with app.app_context():
+    db.drop_all()
+    db.create_all()
+# ────────────────────────────────────────────────────
 
 def get_rank_from_xp(xp: int) -> str:
     if xp >= 200: return "Black Belt"
@@ -31,12 +39,12 @@ def get_rank_from_xp(xp: int) -> str:
     return "White Belt"
 
 class User(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(80), unique=True, nullable=False)
-    email    = db.Column(db.String(120), unique=True, nullable=False)
-    password = db.Column(db.String(120), nullable=False)
-    xp       = db.Column(db.Integer, default=0, nullable=False)
-    completed_challenges = db.Column(PickleType, default=list, nullable=False)
+    id                    = db.Column(db.Integer, primary_key=True)
+    username              = db.Column(db.String(80), unique=True, nullable=False)
+    email                 = db.Column(db.String(120), unique=True, nullable=False)
+    password              = db.Column(db.String(120), nullable=False)
+    xp                    = db.Column(db.Integer, default=0, nullable=False)
+    completed_challenges  = db.Column(PickleType, default=list, nullable=False)
 
 class Challenge(db.Model):
     id              = db.Column(db.Integer, primary_key=True)
@@ -47,9 +55,6 @@ class Challenge(db.Model):
     difficulty      = db.Column(db.String(50), nullable=False)  # easy/medium/hard
     xp_reward       = db.Column(db.Integer, nullable=False)
 
-with app.app_context():
-    db.create_all()
-
 @app.route('/register', methods=['POST'])
 def register():
     data = request.get_json()
@@ -58,7 +63,7 @@ def register():
     if User.query.filter_by(email=data['email']).first():
         return jsonify(message='Email already exists!'), 400
     pwd = bcrypt.generate_password_hash(data['password']).decode('utf-8')
-    u = User(username=data['username'], email=data['email'], password=pwd)
+    u   = User(username=data['username'], email=data['email'], password=pwd)
     db.session.add(u)
     db.session.commit()
     return jsonify(message='User registered successfully!'), 201
@@ -66,7 +71,7 @@ def register():
 @app.route('/login', methods=['POST'])
 def login():
     data = request.get_json()
-    u = User.query.filter_by(username=data['username']).first()
+    u    = User.query.filter_by(username=data['username']).first()
     if u and bcrypt.check_password_hash(u.password, data['password']):
         token = create_access_token(identity=str(u.id))
         return jsonify(access_token=token), 200
@@ -76,7 +81,7 @@ def login():
 @jwt_required()
 def list_challenges():
     user = User.query.get_or_404(int(get_jwt_identity()))
-    out = []
+    out  = []
     for c in Challenge.query.all():
         out.append({
             "id": c.id,
@@ -91,7 +96,7 @@ def list_challenges():
 @jwt_required()
 def get_challenge(challenge_id):
     user = User.query.get_or_404(int(get_jwt_identity()))
-    c = Challenge.query.get_or_404(challenge_id)
+    c    = Challenge.query.get_or_404(challenge_id)
     return jsonify({
         "id": c.id,
         "title": c.title,
@@ -107,12 +112,12 @@ def get_challenge(challenge_id):
 @jwt_required()
 def run_challenge():
     data = request.get_json()
-    cid = data.get('challenge_id')
+    cid  = data.get('challenge_id')
     code = data.get('code', '')
-    c = Challenge.query.get_or_404(cid)
-    inp = c.sample_input or ''
+    c    = Challenge.query.get_or_404(cid)
+    inp  = c.sample_input or ''
 
-    # Save to temp file
+    # Write code to a temp file
     with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
         f.write(code)
         fname = f.name
@@ -134,22 +139,22 @@ def run_challenge():
 @app.route('/api/submit-challenge', methods=['POST'])
 @jwt_required()
 def submit_challenge():
-    data = request.get_json()
-    cid = data.get("challenge_id")
-    code = data.get("code", "")
+    data        = request.get_json()
+    cid         = data.get("challenge_id")
+    code        = data.get("code", "")
     user_output = data.get("user_output", "")
 
-    c = Challenge.query.get_or_404(cid)
+    c   = Challenge.query.get_or_404(cid)
     exp = c.expected_output or ""
 
-    # === Cheat detection: disallow literal-print cheats ===
+    # Cheat-detect literal print
     lit = re.escape(exp.strip())
     if re.search(rf'print\(\s*{lit}\s*\)', code):
         return jsonify({"message": "Incorrect solution."}), 400
 
-    # normalize whitespace+case
-    def normalize(text: str) -> str:
-        return "".join(text.lower().split())
+    # Normalize for comparison
+    def normalize(txt: str) -> str:
+        return "".join(txt.lower().split())
 
     if normalize(user_output) != normalize(exp):
         return jsonify({"message": "Incorrect solution."}), 400
