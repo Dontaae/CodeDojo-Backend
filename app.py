@@ -7,12 +7,16 @@ from flask_jwt_extended import (
 )
 from flask_cors import CORS
 from sqlalchemy import PickleType
-import subprocess, tempfile, re
+import subprocess
+import tempfile
+import re
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['JWT_SECRET_KEY'] = 'supersecretkey'
+app.config['JWT_SECRET_KEY'] = 'supersecretkey'  # Change in production
+
+# Initialize extensions
 db = SQLAlchemy(app)
 bcrypt = Bcrypt(app)
 jwt = JWTManager(app)
@@ -25,6 +29,7 @@ def get_rank_from_xp(xp: int) -> str:
     if xp >= 30:  return "Blue Belt"
     return "White Belt"
 
+# Models
 class User(db.Model):
     id   = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
@@ -39,12 +44,13 @@ class Challenge(db.Model):
     description     = db.Column(db.Text, nullable=False)
     sample_input    = db.Column(db.Text, nullable=False)
     expected_output = db.Column(db.Text, nullable=False)
-    difficulty      = db.Column(db.String(50), nullable=False)
+    difficulty      = db.Column(db.String(50), nullable=False)  # easy/medium/hard
     xp_reward       = db.Column(db.Integer, nullable=False)
 
 with app.app_context():
     db.create_all()
 
+# Auth routes
 @app.route('/register', methods=['POST'])
 def register():
     data = request.get_json()
@@ -67,6 +73,7 @@ def login():
         return jsonify(access_token=token), 200
     return jsonify(message='Invalid credentials!'), 401
 
+# List challenges with completion flag
 @app.route('/api/challenges', methods=['GET'])
 @jwt_required()
 def list_challenges():
@@ -82,6 +89,7 @@ def list_challenges():
         })
     return jsonify(out), 200
 
+# Get single challenge + completion flag
 @app.route('/api/challenges/<int:challenge_id>', methods=['GET'])
 @jwt_required()
 def get_challenge(challenge_id):
@@ -98,43 +106,76 @@ def get_challenge(challenge_id):
         "completed": c.id in user.completed_challenges
     }), 200
 
+# Run user code
 @app.route('/api/run-challenge', methods=['POST'])
 @jwt_required()
 def run_challenge():
     data = request.get_json()
-    c = Challenge.query.get_or_404(data['challenge_id'])
-    # … your temp-file + subprocess logic …
-    # return {'stdout':…, 'stderr':…}
+    cid = data.get('challenge_id')
+    code = data.get('code', '')
+    c = Challenge.query.get_or_404(cid)
+    sample_input = c.sample_input or ''
 
+    # write to temp file
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+        f.write(code)
+        fname = f.name
+
+    try:
+        proc = subprocess.run(
+            ['python', fname],
+            input=sample_input.encode('utf-8'),
+            capture_output=True,
+            timeout=5
+        )
+        stdout = proc.stdout.decode('utf-8')
+        stderr = proc.stderr.decode('utf-8')
+        return jsonify({'stdout': stdout, 'stderr': stderr}), 200
+
+    except subprocess.TimeoutExpired:
+        return jsonify({'stdout': '', 'stderr': 'Error: execution timed out'}), 400
+
+    except Exception as e:
+        return jsonify({'stdout': '', 'stderr': f'Error running code: {str(e)}'}), 500
+
+# Submit solution & award XP
 @app.route('/api/submit-challenge', methods=['POST'])
 @jwt_required()
 def submit_challenge():
     data = request.get_json()
-    c   = Challenge.query.get_or_404(data['challenge_id'])
-    u   = User.query.get_or_404(int(get_jwt_identity()))
-    out = data.get('user_output', '')
-    exp = c.expected_output or ""
+    cid = data.get('challenge_id')
+    user_output = data.get('user_output', '')
+    c = Challenge.query.get_or_404(cid)
+    u = User.query.get_or_404(int(get_jwt_identity()))
+    expected = c.expected_output or ''
 
-    # cheat-detector + normalize…
-    def normalize(s): return "".join(s.lower().split())
-    if normalize(out) != normalize(exp):
-        return jsonify(message="Incorrect solution."), 400
+    # cheat prevention: disallow literal-print of expected
+    lit = re.escape(expected.strip())
+    if re.search(rf'print\(\s*{lit}\s*\)', data.get('code', '')):
+        return jsonify(message='Incorrect solution.'), 400
 
-    if c.id not in u.completed_challenges:
+    # normalize whitespace & case
+    def normalize(s: str) -> str:
+        return "".join(s.lower().split())
+
+    if normalize(user_output) != normalize(expected):
+        return jsonify(message='Incorrect solution.'), 400
+
+    if cid not in u.completed_challenges:
         u.xp += c.xp_reward
-        u.completed_challenges.append(c.id)
+        u.completed_challenges.append(cid)
         db.session.commit()
-        return jsonify(
-           message="Correct! XP awarded.",
-           xp=u.xp,
-           rank=get_rank_from_xp(u.xp)
-        ), 200
+        return jsonify({
+            "message": "Correct! XP awarded.",
+            "xp": u.xp,
+            "rank": get_rank_from_xp(u.xp)
+        }), 200
 
-    return jsonify(
-       message="Already completed – no additional XP.",
-       xp=u.xp,
-       rank=get_rank_from_xp(u.xp)
-    ), 200
+    return jsonify({
+        "message": "Already completed – no additional XP.",
+        "xp": u.xp,
+        "rank": get_rank_from_xp(u.xp)
+    }), 200
 
 if __name__ == '__main__':
     app.run(debug=True)
