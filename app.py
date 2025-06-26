@@ -10,9 +10,10 @@ from sqlalchemy import PickleType
 import subprocess
 import tempfile
 import re
+import os
 
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(os.path.abspath(os.path.dirname(__file__)), 'users.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['JWT_SECRET_KEY'] = 'supersecretkey'  # Change in production
 
@@ -44,7 +45,7 @@ class Challenge(db.Model):
     description = db.Column(db.Text, nullable=False)
     sample_input = db.Column(db.Text, nullable=False)
     expected_output = db.Column(db.Text, nullable=False)
-    difficulty = db.Column(db.String(50), nullable=False)  # easy/medium/hard
+    difficulty = db.Column(db.String(50), nullable=False)
     xp_reward = db.Column(db.Integer, nullable=False)
 
 with app.app_context():
@@ -78,8 +79,10 @@ def login():
 @jwt_required()
 def list_challenges():
     user = User.query.get_or_404(int(get_jwt_identity()))
+    challenges = Challenge.query.all()
+    
     out = []
-    for c in Challenge.query.all():
+    for c in challenges:
         out.append({
             "id": c.id,
             "title": c.title,
@@ -89,7 +92,7 @@ def list_challenges():
         })
     return jsonify(out), 200
 
-# Get single challenge + completion flag
+# Get single challenge
 @app.route('/api/challenges/<int:challenge_id>', methods=['GET'])
 @jwt_required()
 def get_challenge(challenge_id):
@@ -135,7 +138,7 @@ def run_challenge():
     except Exception as e:
         return jsonify({'stdout': '', 'stderr': f'Error running code: {str(e)}'}), 500
 
-# Submit solution & award XP
+# Submit solution
 @app.route('/api/submit-challenge', methods=['POST'])
 @jwt_required()
 def submit_challenge():
@@ -146,12 +149,12 @@ def submit_challenge():
     u = User.query.get_or_404(int(get_jwt_identity()))
     expected = c.expected_output or ''
 
-    # cheat prevention
+    # Cheat prevention
     lit = re.escape(expected.strip())
     if re.search(rf'print\(\s*{lit}\s*\)', data.get('code', '')):
         return jsonify(message='Incorrect solution.'), 400
 
-    # normalize whitespace & case
+    # Normalize comparison
     def normalize(s: str) -> str:
         return "".join(s.lower().split())
 
