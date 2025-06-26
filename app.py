@@ -31,21 +31,21 @@ def get_rank_from_xp(xp: int) -> str:
 
 # Models
 class User(db.Model):
-    id   = db.Column(db.Integer, primary_key=True)
+    id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
-    email    = db.Column(db.String(120), unique=True, nullable=False)
+    email = db.Column(db.String(120), unique=True, nullable=False)
     password = db.Column(db.String(120), nullable=False)
-    xp       = db.Column(db.Integer, default=0, nullable=False)
+    xp = db.Column(db.Integer, default=0, nullable=False)
     completed_challenges = db.Column(PickleType, default=list, nullable=False)
 
 class Challenge(db.Model):
-    id              = db.Column(db.Integer, primary_key=True)
-    title           = db.Column(db.String(150), nullable=False)
-    description     = db.Column(db.Text, nullable=False)
-    sample_input    = db.Column(db.Text, nullable=False)
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(150), nullable=False)
+    description = db.Column(db.Text, nullable=False)
+    sample_input = db.Column(db.Text, nullable=False)
     expected_output = db.Column(db.Text, nullable=False)
-    difficulty      = db.Column(db.String(50), nullable=False)  # easy/medium/hard
-    xp_reward       = db.Column(db.Integer, nullable=False)
+    difficulty = db.Column(db.String(50), nullable=False)  # easy/medium/hard
+    xp_reward = db.Column(db.Integer, nullable=False)
 
 with app.app_context():
     db.create_all()
@@ -116,7 +116,6 @@ def run_challenge():
     c = Challenge.query.get_or_404(cid)
     sample_input = c.sample_input or ''
 
-    # write to temp file
     with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
         f.write(code)
         fname = f.name
@@ -131,10 +130,8 @@ def run_challenge():
         stdout = proc.stdout.decode('utf-8')
         stderr = proc.stderr.decode('utf-8')
         return jsonify({'stdout': stdout, 'stderr': stderr}), 200
-
     except subprocess.TimeoutExpired:
         return jsonify({'stdout': '', 'stderr': 'Error: execution timed out'}), 400
-
     except Exception as e:
         return jsonify({'stdout': '', 'stderr': f'Error running code: {str(e)}'}), 500
 
@@ -149,7 +146,7 @@ def submit_challenge():
     u = User.query.get_or_404(int(get_jwt_identity()))
     expected = c.expected_output or ''
 
-    # cheat prevention: disallow literal-print of expected
+    # cheat prevention
     lit = re.escape(expected.strip())
     if re.search(rf'print\(\s*{lit}\s*\)', data.get('code', '')):
         return jsonify(message='Incorrect solution.'), 400
@@ -161,20 +158,18 @@ def submit_challenge():
     if normalize(user_output) != normalize(expected):
         return jsonify(message='Incorrect solution.'), 400
 
-    if cid not in u.completed_challenges:
+    challenge_completed = cid in u.completed_challenges
+    if not challenge_completed:
         u.xp += c.xp_reward
         u.completed_challenges.append(cid)
         db.session.commit()
-        return jsonify({
-            "message": "Correct! XP awarded.",
-            "xp": u.xp,
-            "rank": get_rank_from_xp(u.xp)
-        }), 200
 
     return jsonify({
-        "message": "Already completed – no additional XP.",
+        "message": "Correct! XP awarded." if not challenge_completed 
+                  else "Already completed - no additional XP.",
         "xp": u.xp,
-        "rank": get_rank_from_xp(u.xp)
+        "rank": get_rank_from_xp(u.xp),
+        "completed": True
     }), 200
 
 if __name__ == '__main__':
